@@ -15,7 +15,7 @@ def search_for_other_than_book() -> list:
     return ["Sku", "Title", "Studio", "EAN", "Release date"]
 
 
-def get_response_of_url(url: str) -> Optional[str]:
+def get_text_response_of_url(url: str) -> Optional[str]:
     headers = {
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)"
                       " Chrome/89.0.4389.90 Safari/537.36"
@@ -91,7 +91,7 @@ def get_category_info(url: str, is_book: bool) -> Optional[dict]:
         info_dictionary = get_book_info_template()
     else:
         info_dictionary = get_template_other_than_book()
-    html = get_response_of_url(url)
+    html = get_text_response_of_url(url)
     if html is not None:
         price_element = find_element_in_soup(html, "div", {"class": "price"}, False)
         if price_element is not None:
@@ -117,39 +117,38 @@ def get_category_info(url: str, is_book: bool) -> Optional[dict]:
 
 def process_different_category(session_book, database_book: db_book,
                                session_other, database_other: db_other, search_pages):
-    html = get_response_of_url("https://www.wob.com/en-gb")
+    html = get_text_response_of_url("https://www.wob.com/en-gb")
     if html is not None:
         category_list = find_element_in_soup(html, "div", {"class": "categoryItem"}, True)
-        if category_list is not None:
-            for category in category_list:
-                if category.a is not None:
-                    is_book = True if "Books" in category.a.text else False
-                    if is_book:
-                        process_category(session_book, database_book, "https://www.wob.com" + category.a["href"],
-                                         category.a.text, is_book, search_pages)
-                    else:
-                        process_category(session_other, database_other, "https://www.wob.com" + category.a["href"],
-                                         category.a.text, is_book, search_pages)
+        if category_list is None:
+            return
+        for category in category_list[1:]:
+            if category.a is None:
+                return
+            is_book = True if "Books" in category.a.text else False
+            process_category(session_book if is_book else session_other,
+                             database_book if is_book else database_other,
+                             "https://www.wob.com" + category.a["href"],
+                             category.a.text, is_book, search_pages)
 
 
 def process_category(session, db, url: str, category_name: str, is_book: bool, maximum_page_number):
-    for page_number in range(1, maximum_page_number+1):
-        print("\n\tFetching From : "+url + "/" + str(page_number))
-        html = get_response_of_url(url + "/" + str(page_number))
+    for page_number in range(1, maximum_page_number + 1):
+        print("\n\tFetching From : " + url + "/" + str(page_number))
+        html = get_text_response_of_url(url + "/" + str(page_number))
         if html is not None:
             section_list = find_element_in_soup(html, "section", {"class": "productList"}, False)
-            if section_list == "Not Enough Pages":
+            if section_list == "Not Enough Pages" or section_list is None:
                 break
-            if section_list is not None:
-                for product in section_list.div:
-                    product_link = "https://www.wob.com" + product.a["href"]
-                    info = get_category_info(product_link, is_book)
-                    if info is not None:
-                        if not is_already_exist_in_database(session, db, info["Sku"]):
-                            if is_book:
-                                save_book_in_database(session, db, category_name, info)
-                            else:
-                                save_others_in_database(session, db, category_name, info)
+            for product in section_list.div:
+                product_link = "https://www.wob.com" + product.a["href"]
+                info = get_category_info(product_link, is_book)
+                if info is not None:
+                    if not is_already_exist_in_database(session, db, info["Sku"]):
+                        if is_book:
+                            save_book_in_database(session, db, category_name, info)
+                        else:
+                            save_others_in_database(session, db, category_name, info)
     session.commit()
 
 
