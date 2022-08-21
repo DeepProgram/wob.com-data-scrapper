@@ -3,6 +3,8 @@
 
 This is a python program to scrap data from wob.com and save it to a sql database
 
+![Tests](https://github.com/mCodingLLC/SlapThatLikeButton-TestingStarterProject/actions/workflows/tests.yml/badge.svg)
+
 ## Screenshots
 
 ![App Screenshot](https://github.com/DeepProgram/wob.com-data-scrapper/raw/screenshot/books_info.png)
