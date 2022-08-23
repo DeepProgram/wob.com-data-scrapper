@@ -1,10 +1,13 @@
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict
+
 import requests
 from bs4 import BeautifulSoup
+from sqlalchemy.orm import Session
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.sql import exists
-import db_book
-import db_other
+
+import database_models
+from database import engine
 
 
 def search_book_info_list() -> List[str]:
@@ -93,23 +96,24 @@ def get_price_element(html: str) -> Optional[BeautifulSoup]:
     return price_element
 
 
-def get_price_text(html: str) -> Any:
+def get_price_text(html: str) -> str:
     price_element = get_price_element(html)
     if price_element is not None:
-        return price_element.text
+        return str(price_element.text)
     return ""
 
 
-def get_valid_product_attribute_and_value(product_attribute_value_element) -> List[str]:
+def get_valid_product_attribute_and_value(product_attribute_value_element: BeautifulSoup) -> List[str]:
     try:
         label_text = product_attribute_value_element.label.text
         div_text = product_attribute_value_element.div.text
-    except Exception:
+    except Exception as e:
+        print(e)
         return []
     return [label_text, div_text]
 
 
-def get_desired_product_info(html: str, is_book: bool, info_dictionary: Dict[str, str]) -> Any:
+def get_desired_product_info(html: str, is_book: bool, info_dictionary: Dict[str, str]) -> Optional[Dict[str, str]]:
     info_elements = find_element_in_soup(html, "div", {"class": "attributes"}, False)
     if info_elements is None:
         return None
@@ -123,21 +127,16 @@ def get_desired_product_info(html: str, is_book: bool, info_dictionary: Dict[str
 
 
 def get_category_info(url: str, is_book: bool) -> Optional[Dict[str, str]]:
-    if is_book:
-        info_dictionary = get_book_info_template()
-    else:
-        info_dictionary = get_template_other_than_book()
-
+    info_dictionary = get_book_info_template() if is_book else get_template_other_than_book()
     html = get_text_response_of_url(url)
     if html is None:
         return None
     info_dictionary["Price"] = get_price_text(html)
-    info_dictionary = get_desired_product_info(html, is_book, info_dictionary)
-    return info_dictionary
+    product_info_dict = get_desired_product_info(html, is_book, info_dictionary)
+    return product_info_dict
 
 
-def process_different_category(session_book, database_book: Any,
-                               session_other, database_other: Any, search_pages):
+def process_different_category(session_obj, search_pages: int):
     html = get_text_response_of_url("https://www.wob.com/en-gb")
     if html is not None:
         category_list = find_element_in_soup(html, "div", {"class": "categoryItem"}, True)
@@ -146,14 +145,12 @@ def process_different_category(session_book, database_book: Any,
         for category in category_list[1:]:
             if category.a is None:
                 return
-            is_book = True if "Books" in category.a.text else False
-            process_category(session_book if is_book else session_other,
-                             database_book if is_book else database_other,
-                             "https://www.wob.com" + category.a["href"],
-                             category.a.text, is_book, search_pages)
+            is_book = "Books" in category.a.text
+            process_category(session_obj, "https://www.wob.com" + category.a["href"], category.a.text, is_book,
+                             search_pages)
 
 
-def process_category(session, db, url: str, category_name: str, is_book: bool, maximum_page_number):
+def process_category(session: Session, url: str, category_name: str, is_book: bool, maximum_page_number):
     for page_number in range(1, maximum_page_number + 1):
         print("\n\tFetching From : " + url + "/" + str(page_number))
         html = get_text_response_of_url(url + "/" + str(page_number))
@@ -165,32 +162,30 @@ def process_category(session, db, url: str, category_name: str, is_book: bool, m
                 product_link = "https://www.wob.com" + product.a["href"]
                 info = get_category_info(product_link, is_book)
                 if info is not None:
-                    if not is_already_exist_in_database(session, db, info["Sku"]):
-                        if is_book:
-                            save_book_in_database(session, db, category_name, info)
-                        else:
-                            save_others_in_database(session, db, category_name, info)
+                    if not is_already_exist_in_database(session, info["Sku"], is_book):
+                        save_product_in_database(session, category_name, info, is_book)
     session.commit()
 
 
-def is_already_exist_in_database(session, db, sku: str) -> Any:
-    return session.query(exists().where(db.Transactions.Sku == sku)).scalar()
+def is_already_exist_in_database(session_obj: Session, sku: str, is_book: bool) -> bool:
+    table = database_models.BookInfo if is_book else database_models.OtherInfo
+    return bool(session_obj.query(exists().where(table.Sku == sku)).scalar())
 
 
-def save_book_in_database(session, db, category_name: str, book_info: Dict[str, str]):
-    table_row = db.Transactions(category_name, book_info["Sku"], book_info["ISBN 13"], book_info["ISBN 10"],
-                                book_info["Title"],
-                                book_info["Author"], book_info["Publisher"], book_info["Year published"],
-                                book_info["Price"])
-
-    session.add(table_row)
-
-
-def save_others_in_database(session, db, category_name: str, other_info: Dict[str, str]):
-    table_row = db.Transactions(category_name, other_info["Sku"], other_info["Title"], other_info["Studio"],
-                                other_info["EAN"], other_info["Release date"], other_info["Price"])
-
-    session.add(table_row)
+def save_product_in_database(session_obj: Session, category_name: str, product_info: Dict[str, str], is_book):
+    if is_book:
+        table_row = database_models.BookInfo(category_name, product_info["Sku"], product_info["ISBN 13"],
+                                             product_info["ISBN 10"],
+                                             product_info["Title"],
+                                             product_info["Author"], product_info["Publisher"],
+                                             product_info["Year published"],
+                                             product_info["Price"])
+    else:
+        table_row = database_models.OtherInfo(category_name, product_info["Sku"], product_info["Title"],
+                                              product_info["Studio"],
+                                              product_info["EAN"], product_info["Release date"],
+                                              product_info["Price"])
+    session_obj.add(table_row)
 
 
 def main():
@@ -200,11 +195,11 @@ def main():
     except ValueError:
         print("Please Enter Valid INTEGER Number....")
         return
-    Session_Book = sessionmaker(bind=db_book.engine)
-    session_book_obj = Session_Book()
-    Session_Other = sessionmaker(bind=db_other.engine)
-    session_other_obj = Session_Other()
-    process_different_category(session_book_obj, db_book, session_other_obj, db_other, search_number_of_pages)
+    database_models.Base.metadata.create_all(bind=engine)
+    session = sessionmaker(bind=engine)
+    session_obj = session()
+    process_different_category(session_obj, search_number_of_pages)
+    print("\n\t\t!! Fetching Completed !!")
 
 
 if __name__ == '__main__':

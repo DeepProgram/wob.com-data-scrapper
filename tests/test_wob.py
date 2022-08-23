@@ -1,12 +1,15 @@
-
-from bs4 import BeautifulSoup
-import pytest
 from unittest import mock
 
+import pytest
+from bs4 import BeautifulSoup
 
 from wob.main import get_text_response_of_url, search_book_info_list, search_for_other_than_book, find_element_in_soup, \
     process_info, get_book_info_template, get_template_other_than_book, get_price_element, get_price_text, \
     get_valid_product_attribute_and_value, get_desired_product_info
+
+
+def string_to_bs4_element(string):
+    return BeautifulSoup(string, "html.parser")
 
 
 def test_search_book_info_list():
@@ -135,9 +138,8 @@ def test_get_valid_product_attribute_and_value_valid():
     assert get_valid_product_attribute_and_value(product_attribute) == ['Sku', 'SkuGOR007760197']
 
 
-def test_get_valid_product_attribute_and_value_invalid(string_to_bs4_element):
-    invalid_element = string_to_bs4_element("<p>Some Invalid Product Elements</p>")
-    assert get_valid_product_attribute_and_value(invalid_element) == []
+def test_get_valid_product_attribute_and_value_invalid():
+    assert get_valid_product_attribute_and_value(string_to_bs4_element("<p>Some Invalid Product Elements</p>")) == []
 
 
 def test_get_desired_product_info_valid(product_info_html, product_info_template):
@@ -147,9 +149,9 @@ def test_get_desired_product_info_valid(product_info_html, product_info_template
     assert get_desired_product_info(product_info_html, True, product_info_template) == output_dict
 
 
-def test_get_desired_product_info_invalid_html(string_to_bs4_element, product_info_template):
-    invalid_product_html = string_to_bs4_element('<p>Invalid Product Info HTML</p>')
-    assert get_desired_product_info(invalid_product_html, True, product_info_template) is None
+def test_get_desired_product_info_invalid_html(product_info_template):
+    invalid_product_html_string = '<p>Invalid Product Info HTML</p>'
+    assert get_desired_product_info(invalid_product_html_string, True, product_info_template) is None
 
 
 def test_get_desired_product_info_invalid_dict(product_info_html):

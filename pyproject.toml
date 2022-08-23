@@ -9,7 +9,7 @@ testpaths = [
     "tests",
 ]
 log_cli = true
-#log_cli_level = "DEBUG"
+log_cli_level = "DEBUG"
 
 
 [tool.mypy]
